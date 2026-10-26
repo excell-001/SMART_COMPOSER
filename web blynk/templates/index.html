@@ -67,7 +67,7 @@
   </main>
 
   <script>
-    const POLL_MS = { poll_seconds } * 1000;
+    const POLL_MS = {{ poll_seconds }} * 1000;
     const $ = id => document.getElementById(id);
 
     const chart = new Chart($('chart'), {
@@ -96,6 +96,16 @@
       try {
         const latest = await (await fetch('/api/latest')).json();
         const status = $('status');
+        if (latest.error) {
+          status.textContent = 'Server error';
+          status.className = 'off';
+          $('updated').textContent = latest.error;
+          return;
+        }
+        if (!latest.ready) {
+          status.textContent = 'Belum ada data';
+          status.className = '';
+        }
         if (latest.ready) {
           $('suhu').textContent = val(latest.suhu);
           $('lembap').textContent = val(latest.lembap);
@@ -106,6 +116,7 @@
         }
 
         const hist = await (await fetch('/api/history')).json();
+        if (!Array.isArray(hist)) return;
         chart.data.labels = hist.map(h => h.waktu.slice(11));
         chart.data.datasets[0].data = hist.map(h => h.suhu);
         chart.data.datasets[1].data = hist.map(h => h.lembap);
@@ -121,11 +132,17 @@
       const qs = date ? '?date=' + encodeURIComponent(date) : '?limit=200';
       $('btnCsv').href = '/log.csv' + (date ? '?date=' + encodeURIComponent(date) : '');
       try {
-        const rows = await (await fetch('/api/log' + qs + (date ? '&limit=2000' : ''))).json();
+        const rows = await (await fetch('/api/log' + qs + (date ? '&limit=1000' : ''))).json();
+        if (!Array.isArray(rows)) {
+          $('logBody').innerHTML = '<tr><td colspan="4">' + (rows.error || 'Gagal memuat log') + '</td></tr>';
+          $('logCount').textContent = '';
+          return;
+        }
         $('logBody').innerHTML = rows.map(r =>
           `<tr><td>${r.waktu}</td><td class="num">${val(r.suhu)}</td><td class="num">${val(r.lembap)}</td><td class="num">${val(r.nilaiGas)}</td></tr>`
         ).join('') || '<tr><td colspan="4">Belum ada data</td></tr>';
-        $('logCount').textContent = rows.length + ' data' + (date ? ' pada ' + date : ' terbaru');
+        $('logCount').textContent = rows.length + ' data' + (date ? ' pada ' + date : ' terbaru')
+          + (date && rows.length >= 1000 ? ' (tabel dibatasi 1000 terbaru, CSV memuat semua)' : '');
       } catch (e) {
         console.error(e);
       }
