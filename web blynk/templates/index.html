@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitoring IoT</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1a1a1a; }
+    header { padding: 16px 20px; background: #0f766e; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.2rem; margin: 0; }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
+    #status { font-size: .9rem; padding: 4px 10px; border-radius: 999px; background: #64748b; }
+    #status.on { background: #16a34a; }
+    #status.off { background: #dc2626; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .card, .box { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .box { margin-top: 12px; }
+    .card .label { color: #64748b; font-size: .85rem; }
+    .card .value { font-size: 2rem; font-weight: 700; margin-top: 4px; }
+    #updated { color: #64748b; font-size: .8rem; margin-top: 8px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .toolbar input, .toolbar button, .toolbar a { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: inherit; text-decoration: none; cursor: pointer; }
+    .toolbar a.primary { background: #0f766e; color: #fff; border-color: #0f766e; }
+    .table-wrap { max-height: 360px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    th { position: sticky; top: 0; background: #f1f5f9; }
+    td.num { font-variant-numeric: tabular-nums; }
+    #logCount { color: #64748b; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Monitoring IoT</h1>
+    <span id="status">memuat...</span>
+  </header>
+  <main>
+    <div class="cards">
+      <div class="card"><div class="label">Suhu</div><div class="value"><span id="suhu">--</span> °C</div></div>
+      <div class="card"><div class="label">Kelembapan</div><div class="value"><span id="lembap">--</span> %</div></div>
+      <div class="card"><div class="label">Nilai Gas</div><div class="value"><span id="nilaiGas">--</span></div></div>
+    </div>
+
+    <div class="box"><canvas id="chart" height="120"></canvas></div>
+    <div id="updated"></div>
+
+    <div class="box">
+      <h2>Log Data</h2>
+      <div class="toolbar">
+        <label for="logDate">Tanggal:</label>
+        <input type="date" id="logDate">
+        <button id="btnAll" type="button">Terbaru</button>
+        <a id="btnCsv" class="primary" href="/log.csv">Download CSV</a>
+        <span id="logCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Waktu (WIB)</th><th>Suhu (°C)</th><th>Lembap (%)</th><th>Nilai Gas</th></tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const POLL_MS = { poll_seconds } * 1000;
+    const $ = id => document.getElementById(id);
+
+    const chart = new Chart($('chart'), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Suhu (°C)', data: [], borderColor: '#ea580c', tension: .3, pointRadius: 0, yAxisID: 'y' },
+          { label: 'Kelembapan (%)', data: [], borderColor: '#2563eb', tension: .3, pointRadius: 0, yAxisID: 'y' },
+          { label: 'Nilai Gas', data: [], borderColor: '#7c3aed', tension: .3, pointRadius: 0, yAxisID: 'y1' }
+        ]
+      },
+      options: {
+        animation: false,
+        scales: {
+          x: { ticks: { maxTicksLimit: 8 } },
+          y: { position: 'left' },
+          y1: { position: 'right', grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+
+    const val = v => (v === null || v === undefined) ? '--' : v;
+
+    async function refreshLive() {
+      try {
+        const latest = await (await fetch('/api/latest')).json();
+        const status = $('status');
+        if (latest.ready) {
+          $('suhu').textContent = val(latest.suhu);
+          $('lembap').textContent = val(latest.lembap);
+          $('nilaiGas').textContent = val(latest.nilaiGas);
+          status.textContent = latest.online ? 'Device online' : 'Device offline';
+          status.className = latest.online ? 'on' : 'off';
+          $('updated').textContent = 'Update terakhir: ' + latest.waktu + ' WIB';
+        }
+
+        const hist = await (await fetch('/api/history')).json();
+        chart.data.labels = hist.map(h => h.waktu.slice(11));
+        chart.data.datasets[0].data = hist.map(h => h.suhu);
+        chart.data.datasets[1].data = hist.map(h => h.lembap);
+        chart.data.datasets[2].data = hist.map(h => h.nilaiGas);
+        chart.update();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function refreshLog() {
+      const date = $('logDate').value;
+      const qs = date ? '?date=' + encodeURIComponent(date) : '?limit=200';
+      $('btnCsv').href = '/log.csv' + (date ? '?date=' + encodeURIComponent(date) : '');
+      try {
+        const rows = await (await fetch('/api/log' + qs + (date ? '&limit=2000' : ''))).json();
+        $('logBody').innerHTML = rows.map(r =>
+          `<tr><td>${r.waktu}</td><td class="num">${val(r.suhu)}</td><td class="num">${val(r.lembap)}</td><td class="num">${val(r.nilaiGas)}</td></tr>`
+        ).join('') || '<tr><td colspan="4">Belum ada data</td></tr>';
+        $('logCount').textContent = rows.length + ' data' + (date ? ' pada ' + date : ' terbaru');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    $('logDate').addEventListener('change', refreshLog);
+    $('btnAll').addEventListener('click', () => { $('logDate').value = ''; refreshLog(); });
+
+    refreshLive();
+    refreshLog();
+    setInterval(() => { refreshLive(); refreshLog(); }, POLL_MS);
+  </script>
+</body>
+</html>
